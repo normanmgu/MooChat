@@ -9,6 +9,7 @@ const app = new Hono()
 // websocket: reference to the websocket open for connection
 const { upgradeWebSocket, websocket } = createBunWebSocket()
 
+// .
 const activeUsers = new Map()
 
 app.use('/*', cors())
