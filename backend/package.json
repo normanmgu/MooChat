@@ -4,7 +4,8 @@
     "dev": "bun run --hot src/index.ts"
   },
   "dependencies": {
-    "hono": "^4.6.20"
+    "hono": "^4.6.20",
+    "shared-types": "file:../shared"
   },
   "devDependencies": {
     "@types/bun": "latest"

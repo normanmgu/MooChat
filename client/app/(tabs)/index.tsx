@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import uuid from "react-native-uuid"
+import { WSMessage, UserResponse, MessagesResponse } from "../../../shared/types"
+
 import {
   View,
   TextInput,
@@ -8,31 +11,49 @@ import {
   SafeAreaView, // Add this
 } from 'react-native';
 
+const BACKEND_URL = "localhost:3000"
+
 export default function HomeScreen() {
   const [message, setMessage] = useState('')
   const [username, setUsername] = useState('')
+  const [id, setId] = useState('')
   const [feed, setFeed] = useState<Array<string>>([])
   const [isConnected, setIsConnected] = useState<true | false>(false)
+  const [ws, setWs] = useState<WebSocket | null>(null)
   
   useEffect(() => {
     setFeed(["Enter username to connect."])
   }, [])
 
-  const createWebsocketConnection = (username: string) => {
-    console.log("made it here")
+  const createWebsocketConnection = (username: string, userId: string) => {
     try {
-      let ws = new WebSocket("ws://localhost:3000/ws")
+      let ws = new WebSocket(`ws://${BACKEND_URL}/ws`)
+
       ws.onopen = () => {
-        ws.send(`User: ${username}`)
+        const connectMessage: WSMessage = {
+          type: "user-connect",
+          username,
+          userId,
+          timestamp: new Date().toISOString()
+        }
+        ws.send(JSON.stringify(connectMessage));
+      }
+
+      ws.onmessage = (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data) as WSMessage
+          setFeed(prevFeed => [...prevFeed, `${data.username}: ${data.message}`])
+        } catch(error) {
+          console.error("Error parsing message: ", error)
+        }
       }
     }
     catch(error) {
-
       throw error
     }
   }
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (message.trim()) {
       if(!isConnected) {
         try {
@@ -40,16 +61,35 @@ export default function HomeScreen() {
           const newUsername = message
           setUsername(newUsername)
 
-          // Connection logic AKA create websocket
-          createWebsocketConnection(newUsername);
+          const newId = uuid.v4(); 
 
-          setFeed(prevFeed => [...prevFeed, `Connected as ${newUsername}`])
-          setIsConnected(true);
+          // make sure user is created first
+          const response = await fetch(`http://${BACKEND_URL}/user`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              id: newId,
+              name: newUsername,
+            })
+          })
+          // const data = await response.json()
+
+          if(response.ok) {
+            createWebsocketConnection(newUsername, newId);
+            setFeed(prevFeed => [...prevFeed, `Connected as ${newUsername}`])
+            setIsConnected(true);
+          }
+          else {
+            throw new Error("Failed to create user")
+          }
         }
-        catch(error) {
+        catch(error: any) {
           console.log(error)
           setUsername("");
-          setFeed(prevFeed => [...prevFeed, error as string])
+          setId("");
+          setFeed(prevFeed => [...prevFeed, error.message || "Failed to connect"])
         }
       }
       else {
@@ -62,22 +102,26 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
+        <View style={styles.feed}>
         {
-          feed.map((msg, idx)=> <Text key={idx}>{msg}</Text>)
+          feed.map((msg, idx)=> <Text style= {styles.message} key={idx}>{msg}</Text>)
         }
+        </View>
         <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
             value={message}
             onChangeText={setMessage}
-            placeholder="Type a message..."
+            placeholder={isConnected ? "Type a message..." : "Enter a username..."}
             multiline
           />
           <TouchableOpacity 
             style={styles.sendButton}
             onPress={handleSend}
           >
-            <Text style={styles.sendButtonText}>Send</Text>
+            <Text style={styles.sendButtonText}>
+              {isConnected ? "Send" : "Connect"}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -133,4 +177,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  feed: {
+    width: "100%",
+    flex: 1,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+  },
+  message: {
+    fontSize: 16,
+    marginVertical: 5,
+    color: "#333",
+  }
+  
 });
