@@ -1,192 +1,172 @@
-import React, { useState, useEffect } from 'react';
-import uuid from "react-native-uuid"
-import { WSMessage, UserResponse, MessagesResponse } from "../../../shared/types"
+import { useState, useEffect, useRef } from 'react'
+import { View, TextInput, ScrollView, StyleSheet, Pressable } from 'react-native'
+import { ThemedText } from '@/components/ThemedText'
+import { ThemedView } from '@/components/ThemedView'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { WSMessage } from '../../../shared/types'
+import uuid from 'react-native-uuid'
 
-import {
-  View,
-  TextInput,
-  TouchableOpacity,
-  Text,
-  StyleSheet,
-  SafeAreaView, // Add this
-} from 'react-native';
+const BACKEND_URL = 'localhost:3000'
 
-const BACKEND_URL = "localhost:3000"
+const ADJECTIVES = ['Happy', 'Sleepy', 'Grumpy', 'Silly', 'Clever', 'Witty', 'Lucky', 'Friendly']
+const ANIMALS = ['Panda', 'Koala', 'Tiger', 'Lion', 'Dolphin', 'Penguin', 'Fox', 'Bear']
 
-export default function HomeScreen() {
-  const [message, setMessage] = useState('')
-  const [username, setUsername] = useState('')
-  const [id, setId] = useState('')
-  const [feed, setFeed] = useState<Array<string>>([])
-  const [isConnected, setIsConnected] = useState<true | false>(false)
+function generateRandomUsername() {
+  const adjective = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]
+  const animal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)]
+  return `${adjective}${animal}`
+}
+
+export default function ChatScreen() {
+  const [messages, setMessages] = useState<Array<{ username: string; content: string }>>([])
+  const [inputMessage, setInputMessage] = useState('')
   const [ws, setWs] = useState<WebSocket | null>(null)
-  
+  const [username, setUsername] = useState(generateRandomUsername())
+  const scrollViewRef = useRef<ScrollView>(null)
+
   useEffect(() => {
-    setFeed(["Enter username to connect."])
-  }, [])
-
-  const createWebsocketConnection = (username: string, userId: string) => {
-    try {
-      let ws = new WebSocket(`ws://${BACKEND_URL}/ws`)
-
-      ws.onopen = () => {
-        const connectMessage: WSMessage = {
-          type: "user-connect",
-          username,
-          userId,
-          timestamp: new Date().toISOString()
-        }
-        ws.send(JSON.stringify(connectMessage));
+    const websocket = new WebSocket(`ws://${BACKEND_URL}/ws`)
+    
+    websocket.onopen = () => {
+      const connectMessage: WSMessage = {
+        type: 'user-connect',
+        username,
+        timestamp: new Date().toISOString(),
+        userId: uuid.v4() as string
       }
+      websocket.send(JSON.stringify(connectMessage))
+    }
 
-      ws.onmessage = (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data) as WSMessage
-          setFeed(prevFeed => [...prevFeed, `${data.username}: ${data.message}`])
-        } catch(error) {
-          console.error("Error parsing message: ", error)
+    websocket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as WSMessage
+        if (data.type === 'chat' || data.type === 'user-connect') {
+          setMessages(prev => [...prev, { 
+            username: data.username,
+            content: data.type === 'user-connect' 
+              ? '👋 joined the chat'
+              : data.message || ''
+          }])
         }
+      } catch(error) {
+        console.error("Error parsing message: ", error)
       }
     }
-    catch(error) {
-      throw error
+
+    setWs(websocket)
+    return () => websocket.close()
+  }, [username])
+
+  const sendMessage = () => {
+    if (inputMessage.trim() && ws?.readyState === WebSocket.OPEN) {
+      const message: WSMessage = {
+        type: 'chat',
+        username,
+        message: inputMessage.trim(),
+        timestamp: new Date().toISOString()
+      }
+      ws.send(JSON.stringify(message))
+      setInputMessage('')
     }
   }
 
-  const handleSend = async () => {
-    if (message.trim()) {
-      if(!isConnected) {
-        try {
-
-          const newUsername = message
-          setUsername(newUsername)
-
-          const newId = uuid.v4(); 
-
-          // make sure user is created first
-          const response = await fetch(`http://${BACKEND_URL}/user`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              id: newId,
-              name: newUsername,
-            })
-          })
-          // const data = await response.json()
-
-          if(response.ok) {
-            createWebsocketConnection(newUsername, newId);
-            setFeed(prevFeed => [...prevFeed, `Connected as ${newUsername}`])
-            setIsConnected(true);
-          }
-          else {
-            throw new Error("Failed to create user")
-          }
-        }
-        catch(error: any) {
-          console.log(error)
-          setUsername("");
-          setId("");
-          setFeed(prevFeed => [...prevFeed, error.message || "Failed to connect"])
-        }
-      }
-      else {
-        // send via socket
-      }
-      setMessage('')
-    }
-  };
-
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <View style={styles.feed}>
-        {
-          feed.map((msg, idx)=> <Text style= {styles.message} key={idx}>{msg}</Text>)
-        }
-        </View>
+    <SafeAreaView style={{ flex: 1 }}>
+      <ThemedView style={styles.container}>
+        <ThemedText style={styles.usernameText}>Chatting as: {username}</ThemedText>
+        <ScrollView 
+          ref={scrollViewRef}
+          style={styles.messagesContainer}
+          onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+        >
+          {messages.map((msg, index) => (
+            <View key={index} style={[
+              styles.messageBox,
+              msg.username === username ? styles.ownMessage : styles.otherMessage
+            ]}>
+              <ThemedText style={styles.username}>{msg.username}</ThemedText>
+              <ThemedText>{msg.content}</ThemedText>
+            </View>
+          ))}
+        </ScrollView>
+        
         <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
-            value={message}
-            onChangeText={setMessage}
-            placeholder={isConnected ? "Type a message..." : "Enter a username..."}
-            multiline
+            value={inputMessage}
+            onChangeText={setInputMessage}
+            placeholder="Type a message..."
+            onSubmitEditing={sendMessage}
+            placeholderTextColor="#666"
           />
-          <TouchableOpacity 
+          <Pressable 
             style={styles.sendButton}
-            onPress={handleSend}
+            onPress={sendMessage}
           >
-            <Text style={styles.sendButtonText}>
-              {isConnected ? "Send" : "Connect"}
-            </Text>
-          </TouchableOpacity>
+            <ThemedText style={styles.sendButtonText}>Send</ThemedText>
+          </Pressable>
         </View>
-      </View>
+      </ThemedView>
     </SafeAreaView>
-  );
+  )
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
   container: {
     flex: 1,
-    justifyContent: 'center', // Changed from flex-end to center
-    backgroundColor: '#fff',
-    paddingHorizontal: 10, // Added padding to prevent touching edges
+    padding: 10,
+  },
+  usernameText: {
+    textAlign: 'center',
+    padding: 10,
+    fontWeight: 'bold',
+  },
+  messagesContainer: {
+    flex: 1,
+    marginBottom: 10,
+  },
+  messageBox: {
+    padding: 10,
+    marginVertical: 5,
+    borderRadius: 8,
+    maxWidth: '80%',
+  },
+  ownMessage: {
+    backgroundColor: '#007AFF',
+    alignSelf: 'flex-end',
+  },
+  otherMessage: {
+    backgroundColor: '#E5E5EA',
+    alignSelf: 'flex-start',
+  },
+  username: {
+    fontSize: 12,
+    marginBottom: 4,
+    opacity: 0.7,
   },
   inputContainer: {
     flexDirection: 'row',
-    padding: 10,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e5e5e5',
-    // Optional: add elevation/shadow to make it stand out
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    alignItems: 'center',
+    paddingVertical: 10,
   },
   input: {
     flex: 1,
-    backgroundColor: '#f0f0f0',
+    borderWidth: 1,
+    borderColor: '#ccc',
     borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
+    padding: 10,
     marginRight: 10,
-    fontSize: 16,
+    color: '#000',
+    backgroundColor: '#fff',
   },
   sendButton: {
-    justifyContent: 'center',
-    alignItems: 'center',
+    padding: 10,
     backgroundColor: '#007AFF',
     borderRadius: 20,
-    paddingHorizontal: 20,
+    minWidth: 70,
+    alignItems: 'center',
   },
   sendButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
   },
-  feed: {
-    width: "100%",
-    flex: 1,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-  },
-  message: {
-    fontSize: 16,
-    marginVertical: 5,
-    color: "#333",
-  }
-  
-});
+})
